@@ -1,0 +1,8 @@
+[submodule "deps/ida-cmake"]
+	path = deps/ida-cmake
+	url = https://github.com/allthingsida/ida-cmake.git
+	shallow = true
+[submodule "deps/ida-sdk"]
+	path = deps/ida-sdk
+	url = https://github.com/HexRaysSA/ida-sdk.git
+	shallow = true

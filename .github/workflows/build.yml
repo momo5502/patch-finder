@@ -1,0 +1,113 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clang-tidy:
+    name: Run Clang Tidy
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install LLVM
+        run: brew install llvm
+
+      - name: Add LLVM to PATH
+        run: echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v6
+
+      - name: CMake Build
+        run: cmake --preset=release -DMOMO_ENABLE_CLANG_TIDY=On && cmake --build --preset=release
+
+  verify-formatting:
+    name: Verify Formatting
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v5
+
+      - name: Verify Formatting
+        uses: jidicula/clang-format-action@v4.15.0
+        with:
+          clang-format-version: "20"
+
+  build:
+    name: Build
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - Windows
+          - Linux
+          - macOS
+        configuration:
+          - Debug
+          - Release
+        include:
+          - configuration: Debug
+            preset: debug
+          - configuration: Release
+            preset: release
+          - platform: Windows
+            runner: windows-latest
+          - platform: Linux
+            runner: ubuntu-latest
+          - platform: macOS
+            runner: macos-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Enable Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+        if: ${{ startsWith(matrix.platform, 'Windows') }}
+        with:
+          arch: "x64"
+
+      - name: CMake Build
+        run: cmake --workflow --preset=${{matrix.preset}}
+
+      - name: Upload Binary
+        uses: actions/upload-artifact@v4
+        if: "${{ matrix.configuration == 'Release' }}"
+        with:
+          name: ${{ matrix.platform }} ${{matrix.configuration}} Binaries
+          path: |
+            deps/ida-sdk/src/bin/plugins/*
+            !deps/ida-sdk/src/bin/plugins/readme.txt
+
+  summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-24.04
+    needs: [build, clang-tidy, verify-formatting]
+    if: always()
+    steps:
+      - uses: geekyeggo/delete-artifact@v5
+        continue-on-error: true
+        with:
+          name: "Temp *"
+
+      - name: Pipeline failed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: exit 1
