@@ -31,7 +31,6 @@ namespace momo
             return buffer.template as<PENTHeaders_t<AddrType>>(nt_headers_offset);
         }
 
-        // TODO: Fix
         template <typename AddrType>
         uint64_t get_first_section_offset(const PENTHeaders_t<AddrType>& nt_headers, const uint64_t nt_headers_offset)
         {
