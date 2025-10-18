@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <cinttypes>
+#include <name.hpp>
 #include <streambuf>
 #include <filesystem>
 
@@ -37,7 +38,7 @@ namespace momo
                 return {};
             }
 
-            return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+            return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
         }
 
         std::string read_module(const modinfo_t& modinfo)
@@ -52,12 +53,95 @@ namespace momo
             return {view};
         }
 
-        void find_patches_in_section(const section_map::value_type& section)
+        std::vector<uint8_t> read_section_data(ea_t start, size_t size)
         {
-get_fileregion_ea()
-            
-            
-            msg("Module: %s at 0x%" PRIX64 " (size: %d)\n", module.name.c_str(), module.base, module.size);
+            std::vector<uint8_t> data(size);
+
+            ssize_t bytes_read = get_bytes(data.data(), static_cast<ssize_t>(size), start);
+
+            if (bytes_read == static_cast<ssize_t>(size))
+            {
+                return data;
+            }
+
+            if (bytes_read <= 0)
+            {
+                return {};
+            }
+
+            data.resize(bytes_read);
+            return data;
+        }
+
+        bool is_similar_enough_for_analysis(const std::span<const uint8_t> buffer1, const std::span<const uint8_t> buffer2)
+        {
+            if (buffer1.size() != buffer2.size())
+            {
+                return false;
+            }
+
+            size_t equal_bytes = 0;
+
+            for (size_t i = 0; i < buffer1.size(); ++i)
+            {
+                if (buffer1[i] == buffer2[i])
+                {
+                    ++equal_bytes;
+                }
+            }
+
+            // Must be at least 90% equal
+            return equal_bytes > ((buffer1.size() / 10) * 9);
+        }
+
+        struct patch
+        {
+            uint64_t address{};
+            uint64_t length{};
+        };
+
+        std::vector<patch> find_patches_in_section(const section_map::value_type& section)
+        {
+            const auto runtime_data = read_section_data(section.first, section.second.size());
+            if (!is_similar_enough_for_analysis(section.second, runtime_data))
+            {
+                return {};
+            }
+
+            std::vector<patch> patches{};
+            std::optional<patch> current_diff{};
+
+            const auto finish_diff = [&](const uint64_t address) {
+                if (!current_diff)
+                {
+                    return;
+                }
+
+                current_diff->length = address - current_diff->address;
+                current_diff->address += section.first;
+
+                patches.emplace_back(*current_diff);
+                current_diff.reset();
+            };
+
+            for (size_t i = 0; i < section.second.size(); ++i)
+            {
+                if (section.second[i] == runtime_data[i])
+                {
+                    if (current_diff)
+                    {
+                        finish_diff(i);
+                    }
+                }
+                else if (!current_diff)
+                {
+                    current_diff.emplace(i);
+                }
+            }
+
+            finish_diff(section.second.size());
+
+            return patches;
         }
 
         void find_patches_in_module(const modinfo_t& modinfo)
@@ -66,16 +150,29 @@ get_fileregion_ea()
             const auto buffer = make_accessor(data);
             const auto sections = parse_pe_file(buffer, modinfo.base);
 
+            std::vector<patch> patches{};
+
             for (const auto& section : sections)
             {
-                find_patches_in_section(section);
+                const auto section_patches = find_patches_in_section(section);
+                if (!section_patches.empty())
+                {
+                    patches.insert(patches.end(), section_patches.begin(), section_patches.end());
+                }
+            }
+
+            for (const auto& patch : patches)
+            {
+                qstring symbol{};
+                get_ea_name(&symbol, patch.address, GN_DEMANGLED | GN_VISIBLE | GN_SHORT);
+                msg("0x%" PRIX64 " (%s) (size: 0x%" PRIX64 ") in %s\n", patch.address, symbol.c_str(), patch.length, modinfo.name.c_str());
             }
         }
     }
 
     void find_patches()
     {
-        msg("Hello from plugin\n");
+        msg("Finding patches...\n");
 
         if (!is_debugger_on())
         {
@@ -94,5 +191,7 @@ get_fileregion_ea()
                 // Just ignore all issues
             }
         }
+
+        msg("Done finding patches!\n");
     }
 }

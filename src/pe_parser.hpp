@@ -45,12 +45,10 @@ namespace momo
             return nt_headers_offset + (first_section_absolute - absolute_base);
         }
 
-        template <typename AddrType, typename SpanElement>
-        section_map parse_sections(const utils::safe_buffer_accessor<SpanElement> buffer, const PENTHeaders_t<AddrType>& nt_headers,
-                                   const uint64_t nt_headers_offset, const uint64_t base_address)
+        template <typename AddrType, typename SpanElement, typename Accessor>
+        void access_sections(const utils::safe_buffer_accessor<SpanElement> buffer, const PENTHeaders_t<AddrType>& nt_headers,
+                             const uint64_t nt_headers_offset, const Accessor& accessor)
         {
-            section_map result{};
-
             const auto first_section_offset = get_first_section_offset(nt_headers, nt_headers_offset);
             const auto sections = buffer.template as<IMAGE_SECTION_HEADER>(static_cast<size_t>(first_section_offset));
 
@@ -58,9 +56,44 @@ namespace momo
             {
                 const auto section = sections.get(i);
 
+                if (!accessor(section))
+                {
+                    break;
+                }
+            }
+        }
+
+        template <typename AddrType, typename SpanElement>
+        std::optional<size_t> rva_to_file_offset(const utils::safe_buffer_accessor<SpanElement> buffer,
+                                                 const PENTHeaders_t<AddrType>& nt_headers, const uint64_t nt_headers_offset,
+                                                 const uint32_t rva)
+        {
+            std::optional<size_t> result{};
+
+            access_sections(buffer, nt_headers, nt_headers_offset, [&](const IMAGE_SECTION_HEADER& section) {
+                const auto size_of_data = std::min(section.SizeOfRawData, section.Misc.VirtualSize);
+                if (section.VirtualAddress <= rva && (section.VirtualAddress + size_of_data) > rva)
+                {
+                    result = section.PointerToRawData + rva - section.VirtualAddress;
+                    return false;
+                }
+
+                return true;
+            });
+
+            return result;
+        }
+
+        template <typename AddrType, typename SpanElement>
+        section_map parse_sections(const utils::safe_buffer_accessor<SpanElement> buffer, const PENTHeaders_t<AddrType>& nt_headers,
+                                   const uint64_t nt_headers_offset, const uint64_t base_address)
+        {
+            section_map result{};
+
+            access_sections(buffer, nt_headers, nt_headers_offset, [&](const IMAGE_SECTION_HEADER& section) {
                 if (section.SizeOfRawData <= 0 || !(section.Characteristics & IMAGE_SCN_MEM_EXECUTE))
                 {
-                    continue;
+                    return true;
                 }
 
                 const auto target_ptr = base_address + section.VirtualAddress;
@@ -73,7 +106,8 @@ namespace momo
                 data.assign(source_ptr, source_ptr + size_of_data);
 
                 result[target_ptr] = std::move(data);
-            }
+                return true;
+            });
 
             return result;
         }
@@ -87,7 +121,15 @@ namespace momo
             }
 
             std::advance(iter, -1);
-            return iter;
+
+            const auto offset = address -iter->first;
+            if (offset < sections.size())
+            {
+                return iter;
+            }
+
+            return sections.end();
+            
         }
 
         template <typename T>
@@ -112,15 +154,15 @@ namespace momo
         }
 
         template <typename AddrType, typename SpanElement>
-        void apply_relocations(const utils::safe_buffer_accessor<SpanElement> buffer, const PEOptionalHeader_t<AddrType>& optional_header,
-                               section_map& sections, const int64_t delta, const uint64_t base_address)
+        void apply_relocations(const utils::safe_buffer_accessor<SpanElement> buffer, const PENTHeaders_t<AddrType>& nt_headers,
+                               const uint64_t nt_headers_offset, section_map& sections, const int64_t delta, const uint64_t base_address)
         {
             if (delta == 0)
             {
                 return;
             }
 
-            const auto* directory = &optional_header.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+            const auto* directory = &nt_headers.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
             if (directory->Size == 0)
             {
                 return;
@@ -129,9 +171,15 @@ namespace momo
             auto relocation_offset = directory->VirtualAddress;
             const auto relocation_end = relocation_offset + directory->Size;
 
+            auto relocation_file_offset = rva_to_file_offset(buffer, nt_headers, nt_headers_offset, relocation_offset);
+            if (!relocation_file_offset.has_value())
+            {
+                return;
+            }
+
             while (relocation_offset < relocation_end)
             {
-                const auto relocation = buffer.template as<IMAGE_BASE_RELOCATION>(relocation_offset).get();
+                const auto relocation = buffer.template as<IMAGE_BASE_RELOCATION>(*relocation_file_offset).get();
 
                 if (relocation.VirtualAddress <= 0 || relocation.SizeOfBlock <= sizeof(IMAGE_BASE_RELOCATION))
                 {
@@ -141,9 +189,10 @@ namespace momo
                 const auto data_size = relocation.SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION);
                 const auto entry_count = data_size / sizeof(uint16_t);
 
-                const auto entries = buffer.template as<uint16_t>(relocation_offset + sizeof(IMAGE_BASE_RELOCATION));
+                const auto entries = buffer.template as<uint16_t>(*relocation_file_offset + sizeof(IMAGE_BASE_RELOCATION));
 
                 relocation_offset += relocation.SizeOfBlock;
+                *relocation_file_offset += relocation.SizeOfBlock;
 
                 for (size_t i = 0; i < entry_count; ++i)
                 {
@@ -179,12 +228,10 @@ namespace momo
             const auto dos_header = get_dos_header(buffer).get();
             const auto nt_headers_offset = dos_header.e_lfanew;
             const auto nt_headers = get_nt_headers<AddrType>(buffer).get();
-            const auto& optional_header = nt_headers.OptionalHeader;
-
-            const int64_t aslr_slide = base_address - optional_header.ImageBase;
+            const int64_t aslr_slide = base_address - nt_headers.OptionalHeader.ImageBase;
 
             auto sections = parse_sections(buffer, nt_headers, nt_headers_offset, base_address);
-            apply_relocations(buffer, optional_header, sections, aslr_slide, base_address);
+            apply_relocations(buffer, nt_headers, nt_headers_offset, sections, aslr_slide, base_address);
 
             return sections;
         }
