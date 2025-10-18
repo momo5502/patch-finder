@@ -3,6 +3,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <optional>
 
 #include "win_pefile.hpp"
 #include "buffer_accessor.hpp"

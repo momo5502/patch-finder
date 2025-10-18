@@ -55,9 +55,10 @@ namespace momo
         {
             std::vector<uint8_t> data(size);
 
-            ssize_t bytes_read = get_bytes(data.data(), static_cast<ssize_t>(size), start);
+            const auto ssize = static_cast<ssize_t>(size);
+            const auto bytes_read = get_bytes(data.data(), ssize, start);
 
-            if (bytes_read == static_cast<ssize_t>(size))
+            if (bytes_read == ssize)
             {
                 return data;
             }

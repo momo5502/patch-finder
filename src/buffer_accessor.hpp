@@ -1,5 +1,6 @@
 #pragma once
 #include <span>
+#include <cstring>
 #include <cstdint>
 #include <stdexcept>
 
