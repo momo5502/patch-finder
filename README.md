@@ -7,7 +7,8 @@ It detectes patches and hooks by scanning executable memory regions and comparin
 
 Currently only works with PE files!
 
-Download it [here](https://github.com/momo5502/patch-finder/actions), from GitHub actions.  
+Download it [here]([https://github.com/momo5502/patch-finder/actions](https://github.com/momo5502/patch-finder/actions?query=branch%3Amain)), from GitHub actions.  
 Click [here](https://youtu.be/xpRAqWmnmZc) to see a demo.
 
 ![preview](./docs/preview.png)
+
