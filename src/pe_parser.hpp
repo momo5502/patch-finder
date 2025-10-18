@@ -91,7 +91,13 @@ namespace momo
             section_map result{};
 
             access_sections(buffer, nt_headers, nt_headers_offset, [&](const IMAGE_SECTION_HEADER& section) {
-                if (section.SizeOfRawData <= 0 || !(section.Characteristics & IMAGE_SCN_MEM_EXECUTE))
+                const auto is_writable = section.Characteristics & IMAGE_SCN_MEM_WRITE;
+                const auto is_discardable = section.Characteristics & IMAGE_SCN_MEM_DISCARDABLE;
+                const auto is_uninitialized = section.Characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA;
+                const auto is_executable = section.Characteristics & IMAGE_SCN_MEM_EXECUTE;
+                const auto is_invalid = is_writable || is_discardable || is_uninitialized || !is_executable;
+
+                if (section.SizeOfRawData <= 0 || is_invalid)
                 {
                     return true;
                 }
@@ -122,14 +128,13 @@ namespace momo
 
             std::advance(iter, -1);
 
-            const auto offset = address -iter->first;
+            const auto offset = address - iter->first;
             if (offset < sections.size())
             {
                 return iter;
             }
 
             return sections.end();
-            
         }
 
         template <typename T>

@@ -2,8 +2,6 @@
 
 #include <fstream>
 #include <cinttypes>
-#include <name.hpp>
-#include <streambuf>
 #include <filesystem>
 
 #include "pe_parser.hpp"
@@ -144,7 +142,7 @@ namespace momo
             return patches;
         }
 
-        void find_patches_in_module(const modinfo_t& modinfo)
+        std::vector<patch> find_patches_in_module(const modinfo_t& modinfo)
         {
             const auto data = read_module(modinfo);
             const auto buffer = make_accessor(data);
@@ -154,6 +152,11 @@ namespace momo
 
             for (const auto& section : sections)
             {
+                if (user_cancelled())
+                {
+                    return {};
+                }
+
                 const auto section_patches = find_patches_in_section(section);
                 if (!section_patches.empty())
                 {
@@ -161,12 +164,31 @@ namespace momo
                 }
             }
 
+            return patches;
+        }
+
+        size_t find_and_log_patches_in_module(const modinfo_t& modinfo)
+        {
+            const auto patches = find_patches_in_module(modinfo);
+
+            if (patches.empty())
+            {
+                return 0;
+            }
+
+            msg("\n%s\n\n", modinfo.name.c_str());
+
             for (const auto& patch : patches)
             {
                 qstring symbol{};
-                get_ea_name(&symbol, patch.address, GN_DEMANGLED | GN_VISIBLE | GN_SHORT);
-                msg("0x%" PRIX64 " (%s) (size: 0x%" PRIX64 ") in %s\n", patch.address, symbol.c_str(), patch.length, modinfo.name.c_str());
+                get_ea_name(&symbol, patch.address, GN_DEMANGLED | GN_VISIBLE | GN_SHORT | GN_LOCAL);
+
+                msg("\t0x%" PRIX64 " (0x%" PRIX64 "): %s\n", patch.address, patch.length, symbol.c_str());
             }
+
+            msg("\n");
+
+            return patches.size();
         }
     }
 
@@ -176,15 +198,32 @@ namespace momo
 
         if (!is_debugger_on())
         {
-            msg("Debugger is not active\n");
+            msg("Debugger must be active to find patches!\n");
             return;
         }
 
-        for (const auto& module : get_loaded_modules())
+        show_wait_box("NODELAY\nFinding modules...");
+
+        size_t total_patches = 0;
+
+        const auto modules = get_loaded_modules();
+
+        for (size_t i = 0; i < modules.size(); ++i)
         {
+            const auto& modinfo = modules[i];
+
             try
             {
-                find_patches_in_module(module);
+                const auto module_filename = std::filesystem::path(modinfo.name.c_str()).filename().string();
+                replace_wait_box("Scanning module (%zd/%zd):\n\n%s", i + 1, modules.size(), module_filename.c_str());
+
+                if (user_cancelled())
+                {
+                    msg("Operation cancelled by user\n");
+                    break;
+                }
+
+                total_patches += find_and_log_patches_in_module(modinfo);
             }
             catch (...)
             {
@@ -192,6 +231,7 @@ namespace momo
             }
         }
 
-        msg("Done finding patches!\n");
+        hide_wait_box();
+        msg("Total patches found: %zu\n", total_patches);
     }
 }
