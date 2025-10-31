@@ -9,6 +9,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(NOT MOMO_ENABLE_CLANG_TIDY)
+  set(CMAKE_OSX_ARCHITECTURES arm64;x86_64)
+endif()
+
 ##########################################
 
 project(patch-finder LANGUAGES C CXX)
