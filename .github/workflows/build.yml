@@ -89,7 +89,7 @@ jobs:
         run: cmake --workflow --preset=${{matrix.preset}}
 
       - name: Upload Binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: "${{ matrix.configuration == 'Release' }}"
         with:
           name: ${{ matrix.platform }} ${{matrix.configuration}} Binaries
