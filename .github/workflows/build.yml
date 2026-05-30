@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install LLVM
-        run: brew install llvm
+        run: brew install llvm@21
 
       - name: Add LLVM to PATH
         run: echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
